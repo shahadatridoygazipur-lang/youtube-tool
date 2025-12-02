@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Auto Playlist Adder 📺</title>
+  <title>Bulk Playlist Manager 🚀</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap');
 
@@ -28,8 +28,11 @@
       padding: 30px;
       text-align: center;
       width: 90%;
-      max-width: 500px;
+      max-width: 600px;
       border: 1px solid rgba(255, 255, 255, 0.2);
+      display: flex;
+      flex-direction: column;
+      max-height: 90vh;
     }
 
     h1 { color: #38bdf8; font-weight: 600; margin-bottom: 10px; font-size: 1.5rem; }
@@ -44,15 +47,15 @@
       border: 1px solid rgba(255,255,255,0.1);
       background: rgba(0, 0, 0, 0.2);
       color: #fff;
-      font-size: 14px;
+      font-size: 13px;
       margin-top: 5px;
       box-sizing: border-box;
     }
     
-    textarea { resize: none; height: 80px; }
+    textarea { resize: none; height: 120px; font-family: monospace; }
     input:focus, textarea:focus { border-color: #38bdf8; outline: none; }
 
-    .btn-container { display: flex; gap: 10px; margin-top: 15px; }
+    .btn-container { display: flex; gap: 10px; margin-top: 10px; }
 
     button {
       flex: 1;
@@ -70,9 +73,26 @@
     button:hover { transform: translateY(-2px); opacity: 0.9; }
     button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-    #status { margin-top: 15px; font-size: 14px; min-height: 20px; }
+    /* লগ এরিয়া ডিজাইন */
+    #logArea {
+      margin-top: 15px;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 10px;
+      border-radius: 10px;
+      height: 150px;
+      overflow-y: auto;
+      text-align: left;
+      font-size: 12px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    .log-item { margin-bottom: 5px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 2px; }
     .success { color: #4ade80; }
     .error { color: #f87171; }
+    .processing { color: #facc15; }
+
+    /* Scrollbar */
+    #logArea::-webkit-scrollbar { width: 6px; }
+    #logArea::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
   </style>
   
   <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -80,40 +100,39 @@
 <body>
 
   <div class="glass">
-    <h1>📺 Playlist Manager</h1>
+    <h1>🚀 Bulk Playlist Manager</h1>
 
     <div class="input-group">
-      <label>তোমার টার্গেট প্লেলিস্ট ID:</label>
+      <label>টার্গেট প্লেলিস্ট ID:</label>
       <input type="text" id="playlistId" placeholder="উদাহরণ: PLxA6_w... (ID only)">
     </div>
 
     <div class="input-group">
-      <label>ভিডিও লিংক (Embed/Url):</label>
-      <textarea id="videoInput" placeholder="লিংক এখানে পেস্ট করো..."></textarea>
+      <label>ভিডিও লিংক (প্রতি লাইনে একটি করে):</label>
+      <textarea id="videoInput" placeholder="https://youtu.be/video1&#10;https://youtu.be/video2&#10;https://youtu.be/video3..."></textarea>
     </div>
 
     <div class="btn-container">
       <button id="authBtn" class="btn-auth" onclick="handleAuth()">
         <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" width="18"> Google Login
       </button>
-      <button id="addBtn" class="btn-add" onclick="processVideo()" disabled>
-        Add to Playlist 🚀
+      <button id="addBtn" class="btn-add" onclick="startBulkProcessing()" disabled>
+        Start Adding All ⚡
       </button>
     </div>
 
-    <div id="status"></div>
+    <div id="logArea">
+      <div style="color: #94a3b8; text-align: center;">লগইন করার পর স্ট্যাটাস এখানে দেখাবে...</div>
+    </div>
   </div>
 
   <script>
-    // ==========================================
-    // তোমার দেওয়া সঠিক Client ID বসানো হয়েছে
-    // ==========================================
+    // তোমার সঠিক Client ID
     const CLIENT_ID = '197847606984-8jcne8ar7h1q7i3spaqic5atsdf3on8v.apps.googleusercontent.com';
     
     let tokenClient;
     let accessToken = null;
 
-    // ১. পেজ লোড হলে গুগল অথেনটিকেশন সেটআপ
     window.onload = function() {
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
@@ -124,46 +143,75 @@
             document.getElementById("authBtn").innerText = "Logged In ✅";
             document.getElementById("authBtn").style.background = "#4ade80";
             document.getElementById("addBtn").disabled = false;
-            document.getElementById("status").innerText = "রেডি! এখন ভিডিও লিংক দিয়ে Add বাটন চাপুন।";
-            document.getElementById("status").className = "success";
+            addLog("System Ready! ভিডিও লিংক দিয়ে Start বাটনে চাপুন।", "success");
           }
         },
       });
     };
 
-    // ২. লগিন বাটন ফাংশন
     function handleAuth() {
       if (accessToken) return;
       tokenClient.requestAccessToken();
     }
 
-    // ৩. ভিডিও প্রসেসিং এবং অ্যাড করা
-    async function processVideo() {
+    // ==========================================
+    // BULK PROCESSING LOGIC
+    // ==========================================
+    async function startBulkProcessing() {
       const videoInput = document.getElementById("videoInput").value;
       const playlistId = document.getElementById("playlistId").value.trim();
-      const statusDiv = document.getElementById("status");
+      const btn = document.getElementById("addBtn");
 
       if (!playlistId) {
-        showStatus("❌ দয়া করে প্লেলিস্ট ID দিন!", "error");
+        alert("দয়া করে প্লেলিস্ট ID দিন!");
         return;
       }
 
-      // ভিডিও ID বের করা (Regex)
-      const match = decodeURIComponent(videoInput).match(/(?:docid=|\/embed\/|v=|\/v\/|youtu\.be\/|\/watch\?v=)([a-zA-Z0-9_-]{11})/);
-      
-      if (!match) {
-        showStatus("❌ কোনো ভিডিও ID পাওয়া যায়নি!", "error");
+      // ১. লাইন বাই লাইন লিংক আলাদা করা
+      const lines = videoInput.split('\n');
+      let videoIds = [];
+
+      // ২. ভ্যালিড ভিডিও ID বের করা
+      lines.forEach(line => {
+        const match = decodeURIComponent(line).match(/(?:docid=|\/embed\/|v=|\/v\/|youtu\.be\/|\/watch\?v=)([a-zA-Z0-9_-]{11})/);
+        if (match) {
+          videoIds.push(match[1]);
+        }
+      });
+
+      if (videoIds.length === 0) {
+        alert("কোনো সঠিক ভিডিও লিংক পাওয়া যায়নি!");
         return;
       }
 
-      const videoId = match[1];
-      showStatus("⏳ ভিডিও প্রসেসিং হচ্ছে...", "success");
+      // ৩. প্রসেসিং শুরু
+      btn.disabled = true;
+      btn.innerText = "Adding...";
+      document.getElementById("logArea").innerHTML = ""; // লগ ক্লিয়ার
+      addLog(`মোট ${videoIds.length} টি ভিডিও পাওয়া গেছে। কাজ শুরু হচ্ছে...`, "processing");
 
-      // API কল করা
-      addToPlaylistApi(playlistId, videoId);
+      for (let i = 0; i < videoIds.length; i++) {
+        const videoId = videoIds[i];
+        addLog(`[${i+1}/${videoIds.length}] ভিডিও অ্যাড হচ্ছে... (${videoId})`, "processing");
+        
+        // API কল
+        const success = await addToPlaylistApi(playlistId, videoId);
+        
+        if (success) {
+          addLog(`✅ [${i+1}/${videoIds.length}] সফল!`, "success");
+        } else {
+          addLog(`❌ [${i+1}/${videoIds.length}] ব্যর্থ!`, "error");
+        }
+
+        // ৪. গুগলকে বিশ্রাম দেওয়া (১ সেকেন্ড দেরি) - নাহলে স্প্যাম ধরবে
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      addLog("🎉 সব কাজ শেষ!", "success");
+      btn.disabled = false;
+      btn.innerText = "Start Adding All ⚡";
     }
 
-    // ৪. ইউটিউব API কল
     async function addToPlaylistApi(playlistId, videoId) {
       try {
         const response = await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=snippet`, {
@@ -183,24 +231,23 @@
           })
         });
 
-        const data = await response.json();
-
-        if (response.ok) {
-          showStatus(`✅ ভিডিও সফলভাবে প্লেলিস্টে অ্যাড হয়েছে!`, "success");
-          document.getElementById("videoInput").value = ""; // ইনপুট ক্লিয়ার
-        } else {
+        if (response.ok) return true;
+        else {
+          const data = await response.json();
           console.error(data);
-          showStatus(`❌ এরর: ${data.error.message}`, "error");
+          return false;
         }
       } catch (error) {
-        showStatus("❌ নেটওয়ার্ক সমস্যা!", "error");
+        return false;
       }
     }
 
-    function showStatus(msg, type) {
-      const el = document.getElementById("status");
-      el.innerText = msg;
-      el.className = type;
+    function addLog(msg, type) {
+      const logArea = document.getElementById("logArea");
+      const div = document.createElement("div");
+      div.className = `log-item ${type}`;
+      div.innerText = msg;
+      logArea.prepend(div); // নতুন লগ সবার উপরে দেখাবে
     }
   </script>
 </body>
